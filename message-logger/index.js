@@ -4,58 +4,38 @@ import { storage } from "@vendetta/plugin";
 
 const patches = [];
 
-// persistent storage
+// init storage safely
 storage.logs ??= {};
 storage.deleted ??= {};
 
-// ----------------------------
-// 1. STORE MESSAGES WHEN SEEN
-// ----------------------------
+function safeLog(event) {
+  try {
+    if (!event?.id) return;
+
+    storage.deleted[event.id] = {
+      id: event.id,
+      channelId: event.channelId,
+      time: Date.now()
+    };
+  } catch {}
+}
+
+// ONLY safe hook (no returns, no UI hacks)
 patches.push(
   before("dispatch", FluxDispatcher, (args) => {
     const event = args?.[0];
     if (!event) return;
 
-    // MESSAGE CREATE / UPDATE (store live message)
-    if (event.type === "MESSAGE_CREATE" || event.type === "MESSAGE_UPDATE") {
-      const msg = event.message;
-      if (!msg?.id) return;
-
-      storage.logs[msg.id] = {
-        id: msg.id,
-        channelId: msg.channel_id,
-        author: msg.author,
-        content: msg.content,
-        attachments: msg.attachments || [],
-        timestamp: Date.now()
-      };
-    }
-
-    // MESSAGE DELETE (only mark)
     if (event.type === "MESSAGE_DELETE") {
-      const id = event.id;
-
-      if (storage.logs[id]) {
-        storage.deleted[id] = {
-          ...storage.logs[id],
-          deletedAt: Date.now()
-        };
-      } else {
-        // fallback if not cached yet
-        storage.deleted[id] = {
-          id,
-          channelId: event.channelId,
-          content: "[uncached message]",
-          deletedAt: Date.now()
-        };
-      }
+      safeLog(event);
     }
   })
 );
 
-// ----------------------------
-// cleanup
-// ----------------------------
 export const onUnload = () => {
-  patches.forEach(u => u());
+  patches.forEach(u => {
+    try { u(); } catch {}
+  });
 };
+
+export default {};
