@@ -4,57 +4,50 @@ import { after, before, instead } from "@vendetta/patcher";
 
 const patches = [];
 
-// safer module resolution
-const ChannelMessages = findByProps("_channelMessages") || {};
-const MessageRecordUtils = findByProps("updateMessageRecord", "createMessageRecord") || {};
+// safe module resolution
+const ChannelMessages = findByProps("_channelMessages");
+const MessageRecordUtils = findByProps("updateMessageRecord", "createMessageRecord");
 const MessageRecord = findByName("MessageRecord", false);
 const RowManager = findByName("RowManager");
 
 import { storage } from "@vendetta/plugin";
 
-// storage init
+// init storage
 storage.deletedMessages ??= {};
 storage.savedImages ??= {};
 
-// save deleted message
+// -------------------- SAFE HELPERS --------------------
+
+function getMessage(event) {
+  try {
+    const channel = ChannelMessages?.get?.(event.channelId);
+    return channel?.get?.(event.id);
+  } catch {
+    return null;
+  }
+}
+
 function saveDeletedMessage(message) {
   try {
-    const messageData = message?.toJS?.();
-    if (!messageData) return;
+    const data = message?.toJS?.();
+    if (!data) return;
 
     storage.deletedMessages[message.id] = {
-      ...messageData,
+      ...data,
       __vml_deleted: true,
       timestamp: Date.now(),
     };
   } catch {}
 }
 
-// safer image save (no FileReader / blob reliance)
-async function saveImage(att) {
-  try {
-    if (!att?.url || !att?.id) return;
-    if (storage.savedImages[att.id]) return;
+// -------------------- MESSAGE DELETE HOOK --------------------
 
-    storage.savedImages[att.id] = {
-      url: att.url,
-      proxy_url: att.proxy_url,
-      filename: att.filename,
-      timestamp: Date.now(),
-    };
-  } catch {}
-}
-
-// MESSAGE DELETE interception
 patches.push(
   before("dispatch", FluxDispatcher, (args) => {
     const event = args?.[0];
     if (!event || event.type !== "MESSAGE_DELETE") return;
 
-    const channels = ChannelMessages._channelMessages || {};
-    const channel = ChannelMessages.get?.(event.channelId);
-    const message = channel?.get?.(event.id);
-
+    const message = getMessage(event);
     if (!message) return;
 
     if (message.author?.id === "1") return;
@@ -62,10 +55,7 @@ patches.push(
 
     saveDeletedMessage(message);
 
-    if (storage.saveImages && message.attachments) {
-      message.attachments.forEach(saveImage);
-    }
-
+    // return patched message safely (only if structure allows)
     return [
       {
         message: {
@@ -78,33 +68,33 @@ patches.push(
   })
 );
 
-// highlight deleted messages
-if (RowManager) {
+// -------------------- UI HIGHLIGHT --------------------
+
+if (RowManager?.prototype) {
   patches.push(
     after("generate", RowManager.prototype, (args, row) => {
       const data = args?.[0];
-      if (!data || data.rowType !== 1) return;
+      if (!data?.message) return;
+      if (!data.message.__vml_deleted) return;
 
-      if (data.message?.__vml_deleted) {
-        row.message.edited = "deleted";
-        row.backgroundHighlight = row.backgroundHighlight || {};
+      row.message.edited = "deleted";
+      row.backgroundHighlight = row.backgroundHighlight || {};
 
-        row.backgroundHighlight.backgroundColor =
-          ReactNative.processColor("#da373c22");
+      row.backgroundHighlight.backgroundColor =
+        ReactNative.processColor("#da373c22");
 
-        row.backgroundHighlight.gutterColor =
-          ReactNative.processColor("#da373cff");
-      }
+      row.backgroundHighlight.gutterColor =
+        ReactNative.processColor("#da373cff");
     })
   );
 }
 
-// message record patch (safe guarded)
-if (MessageRecordUtils.updateMessageRecord) {
+// -------------------- MESSAGE RECORD PATCH --------------------
+
+if (MessageRecordUtils?.updateMessageRecord) {
   patches.push(
-    instead("updateMessageRecord", MessageRecordUtils, function (args, orig) {
-      const oldRecord = args[0];
-      const newRecord = args[1];
+    instead("updateMessageRecord", MessageRecordUtils, (args, orig) => {
+      const [oldRecord, newRecord] = args;
 
       if (newRecord?.__vml_deleted) {
         return MessageRecordUtils.createMessageRecord(
@@ -118,8 +108,7 @@ if (MessageRecordUtils.updateMessageRecord) {
   );
 }
 
-// record creation
-if (MessageRecordUtils.createMessageRecord) {
+if (MessageRecordUtils?.createMessageRecord) {
   patches.push(
     after("createMessageRecord", MessageRecordUtils, (args, record) => {
       record.__vml_deleted = args?.[0]?.__vml_deleted;
@@ -127,7 +116,6 @@ if (MessageRecordUtils.createMessageRecord) {
   );
 }
 
-// message class patch
 if (MessageRecord) {
   patches.push(
     after("default", MessageRecord, (args, record) => {
@@ -136,13 +124,16 @@ if (MessageRecord) {
   );
 }
 
-// restore messages
+// -------------------- RESTORE --------------------
+
 function restoreDeletedMessages() {
   const stored = storage.deletedMessages || {};
 
+  const channels = ChannelMessages?._channelMessages || {};
+
   for (const id in stored) {
     const msg = stored[id];
-    const channel = ChannelMessages.get?.(msg.channel_id);
+    const channel = ChannelMessages?.get?.(msg.channel_id);
     const message = channel?.get?.(id);
 
     if (message) message.__vml_deleted = true;
@@ -151,7 +142,8 @@ function restoreDeletedMessages() {
 
 restoreDeletedMessages();
 
-// cleanup
+// -------------------- CLEANUP --------------------
+
 export const onUnload = () => {
   patches.forEach((u) => {
     try {
