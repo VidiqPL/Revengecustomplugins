@@ -1,2 +1,5 @@
-console.log("PLUGIN LOADED");
-export default {};
+module.exports = {
+  onLoad() {
+    console.log("Message Logger loaded");
+  }
+};
