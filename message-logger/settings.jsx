@@ -6,20 +6,27 @@ import { useProxy } from "@vendetta/storage";
 
 const { FormIcon, FormSwitchRow, FormSection, FormRow } = Forms;
 
+// safe init
 storage.nopk ??= false;
 storage.saveImages ??= false;
 
 export default function Settings() {
   useProxy(storage);
 
+  // clear everything safely
   const clearLogs = () => {
-    storage.deletedMessages = {};
-    storage.savedImages = {};
+    storage.logs = {};
+    storage.deleted = {};
   };
+
+  const logCount = Object.keys(storage.logs || {}).length;
+  const deletedCount = Object.keys(storage.deleted || {}).length;
 
   return (
     <ReactNative.ScrollView>
+      {/* SETTINGS */}
       <FormSection title="Message Logger">
+
         <FormSwitchRow
           label="Ignore PluralKit"
           leading={<FormIcon source={getAssetIDByName("ic_block")} />}
@@ -33,24 +40,28 @@ export default function Settings() {
           value={storage.saveImages}
           onValueChange={(v) => (storage.saveImages = v)}
         />
+
       </FormSection>
 
+      {/* DATA */}
       <FormSection title="Data">
+
         <FormRow
-          label="Clear Logs"
+          label="Clear All Logs"
           leading={<FormIcon source={getAssetIDByName("ic_delete")} />}
           onPress={clearLogs}
         />
 
         <FormRow
-          label={`Deleted: ${Object.keys(storage.deletedMessages || {}).length}`}
+          label={`Stored Messages: ${logCount}`}
           disabled
         />
 
         <FormRow
-          label={`Saved: ${Object.keys(storage.savedImages || {}).length}`}
+          label={`Deleted Messages: ${deletedCount}`}
           disabled
         />
+
       </FormSection>
     </ReactNative.ScrollView>
   );
